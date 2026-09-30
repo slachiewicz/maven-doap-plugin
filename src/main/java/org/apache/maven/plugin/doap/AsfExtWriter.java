@@ -25,13 +25,13 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import org.apache.maven.model.Developer;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Developer;
+import org.apache.maven.api.settings.Settings;
 import org.apache.maven.plugin.doap.options.ASFExtOptions;
 import org.apache.maven.plugin.doap.options.ASFExtOptionsUtil;
 import org.apache.maven.plugin.doap.options.DoapOptions;
 import org.apache.maven.plugin.doap.options.Standard;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.settings.Settings;
 import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.xml.XMLWriter;
 
@@ -69,7 +69,7 @@ class AsfExtWriter {
      *      https://projects.apache.org/ns/asfext#</a>
      * @see <a href="http://projects.apache.org/docs/pmc.html">http://projects.apache.org/docs/pmc.html</a>
      */
-    void writeASFext(XMLWriter writer, MavenProject project) {
+    void writeASFext(XMLWriter writer, Project project) {
         if (!asfExtOptions.isIncluded()) {
             return;
         }
@@ -115,7 +115,7 @@ class AsfExtWriter {
 
         // asfext:chair
         @SuppressWarnings("unchecked")
-        List<Developer> developers = new ArrayList<Developer>(project.getDevelopers());
+        List<Developer> developers = new ArrayList<Developer>(project.getModel().getDevelopers());
         ContributorWriter.sortContributors(developers);
 
         if (StringUtils.isNotEmpty(asfExtOptions.getChair())) {

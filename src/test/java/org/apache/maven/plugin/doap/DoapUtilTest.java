@@ -18,25 +18,22 @@
  */
 package org.apache.maven.plugin.doap;
 
-import javax.inject.Inject;
-
 import java.io.File;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.maven.model.Contributor;
-import org.apache.maven.model.Developer;
-import org.apache.maven.model.License;
-import org.apache.maven.project.MavenProject;
-import org.codehaus.plexus.i18n.I18N;
-import org.codehaus.plexus.testing.PlexusTest;
+import org.apache.maven.api.model.Contributor;
+import org.apache.maven.api.model.Developer;
+import org.apache.maven.api.model.License;
+import org.apache.maven.api.model.Model;
+import org.apache.maven.api.plugin.testing.stubs.ProjectStub;
 import org.codehaus.plexus.util.xml.PrettyPrintXMLWriter;
 import org.codehaus.plexus.util.xml.XMLWriter;
 import org.junit.jupiter.api.Test;
 
-import static org.codehaus.plexus.testing.PlexusExtension.getBasedir;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,11 +47,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  *
  * @author <a href="mailto:vincent.siveton@gmail.com">Vincent Siveton</a>
  */
-@PlexusTest
 class DoapUtilTest {
-
-    @Inject
-    private I18N i18n;
 
     /**
      * Test method for {@link DoapUtil#writeElement(XMLWriter, String, String, String)}.
@@ -108,13 +101,13 @@ class DoapUtilTest {
 
     /**
      * Test method for:
-     * {@link DoapUtil#getContributorsWithDeveloperRole(I18N, List)}
-     * {@link DoapUtil#getContributorsWithDocumenterRole(I18N, List)}
-     * {@link DoapUtil#getContributorsWithHelperRole(I18N, List)}
-     * {@link DoapUtil#getContributorsWithMaintainerRole(I18N, List)}
-     * {@link DoapUtil#getContributorsWithTesterRole(I18N, List)}
-     * {@link DoapUtil#getContributorsWithTranslatorRole(I18N, List)}
-     * {@link DoapUtil#getContributorsWithUnknownRole(I18N, List)}
+     * {@link DoapUtil#getContributorsWithDeveloperRole(List)}
+     * {@link DoapUtil#getContributorsWithDocumenterRole(List)}
+     * {@link DoapUtil#getContributorsWithHelperRole(List)}
+     * {@link DoapUtil#getContributorsWithMaintainerRole(List)}
+     * {@link DoapUtil#getContributorsWithTesterRole(List)}
+     * {@link DoapUtil#getContributorsWithTranslatorRole(List)}
+     * {@link DoapUtil#getContributorsWithUnknownRole(List)}
      *
      */
     @Test
@@ -123,70 +116,72 @@ class DoapUtilTest {
         List<Contributor> developersOrContributors = new ArrayList<>();
 
         // One role
-        Developer dev = new Developer();
-        dev.setId("dev1");
-        dev.addRole("maintainer");
+        Developer dev = Developer.newBuilder()
+                .id("dev1")
+                .roles(Arrays.asList("maintainer"))
+                .build();
 
         developersOrContributors.add(dev);
 
-        assertTrue(DoapUtil.getContributorsWithDeveloperRole(i18n, developersOrContributors)
+        assertTrue(DoapUtil.getContributorsWithDeveloperRole(developersOrContributors)
                 .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithDocumenterRole(i18n, developersOrContributors)
+        assertTrue(DoapUtil.getContributorsWithDocumenterRole(developersOrContributors)
                 .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithHelperRole(i18n, developersOrContributors)
+        assertTrue(
+                DoapUtil.getContributorsWithHelperRole(developersOrContributors).isEmpty());
+        assertFalse(DoapUtil.getContributorsWithMaintainerRole(developersOrContributors)
                 .isEmpty());
-        assertFalse(DoapUtil.getContributorsWithMaintainerRole(i18n, developersOrContributors)
+        assertTrue(
+                DoapUtil.getContributorsWithTesterRole(developersOrContributors).isEmpty());
+        assertTrue(DoapUtil.getContributorsWithTranslatorRole(developersOrContributors)
                 .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithTesterRole(i18n, developersOrContributors)
-                .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithTranslatorRole(i18n, developersOrContributors)
-                .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithUnknownRole(i18n, developersOrContributors)
+        assertTrue(DoapUtil.getContributorsWithUnknownRole(developersOrContributors)
                 .isEmpty());
 
         // Several roles
         developersOrContributors.clear();
 
-        dev = new Developer();
-        dev.setId("dev1");
-        dev.addRole(" MAINTAINER");
-        dev.addRole("tesTER ");
-        dev.addRole("blabla");
-        dev.addRole("translato r");
+        dev = Developer.newBuilder()
+                .id("dev1")
+                .roles(Arrays.asList(" MAINTAINER", "tesTER ", "blabla", "translato r"))
+                .build();
 
         developersOrContributors.add(dev);
 
-        assertTrue(DoapUtil.getContributorsWithDeveloperRole(i18n, developersOrContributors)
+        assertTrue(DoapUtil.getContributorsWithDeveloperRole(developersOrContributors)
                 .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithDocumenterRole(i18n, developersOrContributors)
+        assertTrue(DoapUtil.getContributorsWithDocumenterRole(developersOrContributors)
                 .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithHelperRole(i18n, developersOrContributors)
+        assertTrue(
+                DoapUtil.getContributorsWithHelperRole(developersOrContributors).isEmpty());
+        assertFalse(DoapUtil.getContributorsWithMaintainerRole(developersOrContributors)
                 .isEmpty());
-        assertFalse(DoapUtil.getContributorsWithMaintainerRole(i18n, developersOrContributors)
+        assertFalse(
+                DoapUtil.getContributorsWithTesterRole(developersOrContributors).isEmpty());
+        assertTrue(DoapUtil.getContributorsWithTranslatorRole(developersOrContributors)
                 .isEmpty());
-        assertFalse(DoapUtil.getContributorsWithTesterRole(i18n, developersOrContributors)
-                .isEmpty());
-        assertTrue(DoapUtil.getContributorsWithTranslatorRole(i18n, developersOrContributors)
-                .isEmpty());
-        assertFalse(DoapUtil.getContributorsWithUnknownRole(i18n, developersOrContributors)
+        assertFalse(DoapUtil.getContributorsWithUnknownRole(developersOrContributors)
                 .isEmpty());
 
         // Skip emeritus role
         developersOrContributors.clear();
 
-        dev = new Developer();
-        dev.setId("dev1");
-        dev.addRole("maintainer");
-        dev.addRole("unknown");
+        dev = Developer.newBuilder()
+                .id("dev1")
+                .roles(Arrays.asList("maintainer", "unknown"))
+                .build();
 
         developersOrContributors.add(dev);
 
-        int sizeBeforeEmeritus = DoapUtil.getContributorsWithUnknownRole(i18n, developersOrContributors)
+        int sizeBeforeEmeritus = DoapUtil.getContributorsWithUnknownRole(developersOrContributors)
                 .size();
-        dev.addRole(" Emeritus");
+        developersOrContributors.clear();
+        developersOrContributors.add(dev.with()
+                .roles(Arrays.asList("maintainer", "unknown", " Emeritus"))
+                .build());
 
         assertEquals(
-                DoapUtil.getContributorsWithUnknownRole(i18n, developersOrContributors)
+                DoapUtil.getContributorsWithUnknownRole(developersOrContributors)
                         .size(),
                 sizeBeforeEmeritus);
     }
@@ -198,37 +193,32 @@ class DoapUtilTest {
      */
     @Test
     void testValidate() {
-        File doapFile = new File(getBasedir(), "src/test/resources/generated-doap-1.0.rdf");
+        File doapFile = new File("src/test/resources/generated-doap-1.0.rdf");
         assertFalse(DoapUtil.validate(doapFile).isEmpty());
     }
 
     /**
      * Test method for:
-     * {@link DoapUtil#interpolate(String, MavenProject, org.apache.maven.settings.Settings)}
+     * {@link DoapUtil#interpolate(String, org.apache.maven.api.Project, org.apache.maven.api.settings.Settings)}
      *
      */
     @Test
     void testInterpolate() {
-        License license = new License();
-        license.setName("licenseName");
-        license.setUrl("licenseUrl");
+        License license =
+                License.newBuilder().name("licenseName").url("licenseUrl").build();
 
         List<Developer> developers = new ArrayList<>();
-        Developer developer1 = new Developer();
-        developer1.setId("id1");
-        developer1.setName("developerName1");
-        developers.add(developer1);
-        Developer developer2 = new Developer();
-        developer2.setId("id1");
-        developer2.setName("developerName2");
-        developers.add(developer2);
+        developers.add(Developer.newBuilder().id("id1").name("developerName1").build());
+        developers.add(Developer.newBuilder().id("id1").name("developerName2").build());
 
-        MavenProject project = new MavenProject();
-        project.setName("projectName");
-        project.setDescription("projectDescription");
-        project.setLicenses(Collections.singletonList(license));
-        project.setDevelopers(developers);
-        project.getProperties().put("myKey", "myValue");
+        ProjectStub project = new ProjectStub();
+        project.setModel(Model.newBuilder()
+                .name("projectName")
+                .description("projectDescription")
+                .licenses(Collections.singletonList(license))
+                .developers(developers)
+                .properties(Collections.singletonMap("myKey", "myValue"))
+                .build());
 
         assertEquals("projectName", DoapUtil.interpolate("${project.name}", project, null));
         assertEquals("my name is projectName", DoapUtil.interpolate("my name is ${project.name}", project, null));

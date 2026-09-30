@@ -24,23 +24,19 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-import org.apache.maven.model.Contributor;
-import org.apache.maven.model.Developer;
+import org.apache.maven.api.model.Contributor;
+import org.apache.maven.api.model.Developer;
 import org.apache.maven.plugin.doap.options.DoapOptions;
-import org.codehaus.plexus.i18n.I18N;
 import org.codehaus.plexus.util.xml.XMLWriter;
 
 class ContributorWriter {
 
     private final DoapOptions doapOptions;
 
-    private final I18N i18n;
-
     private final UserMessages messages;
 
-    ContributorWriter(DoapOptions doapOptions, I18N i18n, UserMessages messages) {
+    ContributorWriter(DoapOptions doapOptions, UserMessages messages) {
         this.doapOptions = doapOptions;
-        this.i18n = i18n;
         this.messages = messages;
     }
 
@@ -63,13 +59,13 @@ class ContributorWriter {
             DoapUtil.writeComment(writer, "Contributed persons.");
         }
 
-        List<Contributor> maintainers = DoapUtil.getContributorsWithMaintainerRole(i18n, contributors);
-        List<Contributor> developers = DoapUtil.getContributorsWithDeveloperRole(i18n, contributors);
-        List<Contributor> documenters = DoapUtil.getContributorsWithDocumenterRole(i18n, contributors);
-        List<Contributor> translators = DoapUtil.getContributorsWithTranslatorRole(i18n, contributors);
-        List<Contributor> testers = DoapUtil.getContributorsWithTesterRole(i18n, contributors);
-        List<Contributor> helpers = DoapUtil.getContributorsWithHelperRole(i18n, contributors);
-        List<Contributor> unknowns = DoapUtil.getContributorsWithUnknownRole(i18n, contributors);
+        List<Contributor> maintainers = DoapUtil.getContributorsWithMaintainerRole(contributors);
+        List<Contributor> developers = DoapUtil.getContributorsWithDeveloperRole(contributors);
+        List<Contributor> documenters = DoapUtil.getContributorsWithDocumenterRole(contributors);
+        List<Contributor> translators = DoapUtil.getContributorsWithTranslatorRole(contributors);
+        List<Contributor> testers = DoapUtil.getContributorsWithTesterRole(contributors);
+        List<Contributor> helpers = DoapUtil.getContributorsWithHelperRole(contributors);
+        List<Contributor> unknowns = DoapUtil.getContributorsWithUnknownRole(contributors);
 
         // By default, all developers are maintainers and contributors are helpers
         if (isDeveloper) {
