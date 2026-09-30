@@ -28,4 +28,4 @@ jobs:
     with:
       # one full run on the oldest Maven the ASF parent lets us build with, next to the regular matrix
       matrix-include: '[{"os": "ubuntu-latest", "jdk": "8", "distribution": "zulu", "maven": "3.9.0"}]'
-      maven4-enabled: true
+      maven4-build: true
