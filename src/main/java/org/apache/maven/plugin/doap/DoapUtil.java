@@ -35,6 +35,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
+import java.util.ResourceBundle;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.WeakHashMap;
@@ -45,10 +46,10 @@ import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.RDFReader;
 import org.apache.jena.rdf.model.impl.RDFDefaultErrorHandler;
-import org.apache.maven.model.Contributor;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.settings.Settings;
-import org.codehaus.plexus.i18n.I18N;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Contributor;
+import org.apache.maven.api.settings.Settings;
+import org.codehaus.plexus.interpolation.AbstractValueSource;
 import org.codehaus.plexus.interpolation.EnvarBasedValueSource;
 import org.codehaus.plexus.interpolation.InterpolationException;
 import org.codehaus.plexus.interpolation.ObjectBasedValueSource;
@@ -242,73 +243,59 @@ public class DoapUtil {
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have a <code>developer</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithDeveloperRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("developers");
+    public static List<Contributor> getContributorsWithDeveloperRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("developers");
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have a <code>documenter</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithDocumenterRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("documenters");
+    public static List<Contributor> getContributorsWithDocumenterRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("documenters");
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have an <code>helper</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithHelperRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("helpers");
+    public static List<Contributor> getContributorsWithHelperRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("helpers");
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have a <code>maintainer</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithMaintainerRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("maintainers");
+    public static List<Contributor> getContributorsWithMaintainerRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("maintainers");
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have a <code>tester</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithTesterRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("testers");
+    public static List<Contributor> getContributorsWithTesterRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("testers");
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have a <code>translator</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithTranslatorRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("translators");
+    public static List<Contributor> getContributorsWithTranslatorRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("translators");
     }
 
     /**
-     * @param i18n the internationalization component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null list of <code>{@link Contributor}</code> which have an <code>unknown</code> DOAP role
      */
-    public static List<Contributor> getContributorsWithUnknownRole(
-            I18N i18n, List<Contributor> developersOrContributors) {
-        return filterContributorsByDoapRoles(i18n, developersOrContributors).get("unknowns");
+    public static List<Contributor> getContributorsWithUnknownRole(List<Contributor> developersOrContributors) {
+        return filterContributorsByDoapRoles(developersOrContributors).get("unknowns");
     }
 
     /**
@@ -472,7 +459,7 @@ public class DoapUtil {
      * @return the value trimmed and interpolated or null if the interpolation doesn't work
      * @since 1.1
      */
-    public static String interpolate(String value, final MavenProject project, Settings settings) {
+    public static String interpolate(String value, final Project project, Settings settings) {
         if (project == null) {
             throw new IllegalArgumentException("project is required");
         }
@@ -492,14 +479,28 @@ public class DoapUtil {
             // ignore
         }
         interpolator.addValueSource(new PropertiesBasedValueSource(System.getProperties()));
-        interpolator.addValueSource(new PropertiesBasedValueSource(project.getProperties()));
-        interpolator.addValueSource(new PrefixedObjectValueSource("project", project));
-        interpolator.addValueSource(new PrefixedObjectValueSource("pom", project));
-        interpolator.addValueSource(new ObjectBasedValueSource(project) {
+        Properties projectProperties = new Properties();
+        projectProperties.putAll(project.getModel().getProperties());
+        interpolator.addValueSource(new PropertiesBasedValueSource(projectProperties));
+        // the Maven 4 Project is a thin handle, the values live in its effective model
+        interpolator.addValueSource(new AbstractValueSource(false) {
+            @Override
+            public Object getValue(String expression) {
+                if ("project.basedir".equals(expression)
+                        || "pom.basedir".equals(expression)
+                        || "basedir".equals(expression)) {
+                    return project.getBasedir().toString();
+                }
+                return null;
+            }
+        });
+        interpolator.addValueSource(new PrefixedObjectValueSource("project", project.getModel()));
+        interpolator.addValueSource(new PrefixedObjectValueSource("pom", project.getModel()));
+        interpolator.addValueSource(new ObjectBasedValueSource(project.getModel()) {
             @Override
             public Object getValue(String expression) {
                 try {
-                    return ReflectionValueExtractor.evaluate(expression, project, true);
+                    return ReflectionValueExtractor.evaluate(expression, project.getModel(), true);
                 } catch (Exception e) {
                     addFeedback("Failed to extract \'" + expression + "\' from: " + project, e);
                 }
@@ -531,19 +532,18 @@ public class DoapUtil {
     // ----------------------------------------------------------------------
 
     /**
-     * Filter the developers/contributors roles by the keys from {@link I18N#getBundle()}. <br/>
+     * Filter the developers/contributors roles by the keys from the <code>doap-person</code> resource bundle. <br/>
      * I18N roles supported in DOAP, i.e. <code>maintainer</code>, <code>developer</code>, <code>documenter</code>,
      * <code>translator</code>, <code>tester</code>, <code>helper</code>. <br/>
      * <b>Note:</b> Actually, only English keys are used.
      *
-     * @param i18n i18n component
      * @param developersOrContributors list of <code>{@link Contributor}</code>
      * @return a none null map with <code>maintainers</code>, <code>developers</code>, <code>documenters</code>,
      *         <code>translators</code>, <code>testers</code>, <code>helpers</code>, <code>unknowns</code> as keys and
      *         list of <code>{@link Contributor}</code> as value
      */
     private static Map<String, List<Contributor>> filterContributorsByDoapRoles(
-            I18N i18n, List<Contributor> developersOrContributors) {
+            List<Contributor> developersOrContributors) {
         Map<String, List<Contributor>> returnMap = new HashMap<>(7);
         returnMap.put("maintainers", new ArrayList<>());
         returnMap.put("developers", new ArrayList<>());
@@ -563,31 +563,31 @@ public class DoapUtil {
             if (roles != null && roles.size() != 0) {
                 for (String role : roles) {
                     role = role.toLowerCase(Locale.ENGLISH);
-                    if (role.contains(getLowerCaseString(i18n, "doap.maintainer"))) {
+                    if (role.contains(getLowerCaseString("doap.maintainer"))) {
                         if (!returnMap.get("maintainers").contains(contributor)) {
                             returnMap.get("maintainers").add(contributor);
                         }
-                    } else if (role.contains(getLowerCaseString(i18n, "doap.developer"))) {
+                    } else if (role.contains(getLowerCaseString("doap.developer"))) {
                         if (!returnMap.get("developers").contains(contributor)) {
                             returnMap.get("developers").add(contributor);
                         }
-                    } else if (role.contains(getLowerCaseString(i18n, "doap.documenter"))) {
+                    } else if (role.contains(getLowerCaseString("doap.documenter"))) {
                         if (!returnMap.get("documenters").contains(contributor)) {
                             returnMap.get("documenters").add(contributor);
                         }
-                    } else if (role.contains(getLowerCaseString(i18n, "doap.translator"))) {
+                    } else if (role.contains(getLowerCaseString("doap.translator"))) {
                         if (!returnMap.get("translators").contains(contributor)) {
                             returnMap.get("translators").add(contributor);
                         }
-                    } else if (role.contains(getLowerCaseString(i18n, "doap.tester"))) {
+                    } else if (role.contains(getLowerCaseString("doap.tester"))) {
                         if (!returnMap.get("testers").contains(contributor)) {
                             returnMap.get("testers").add(contributor);
                         }
-                    } else if (role.contains(getLowerCaseString(i18n, "doap.helper"))) {
+                    } else if (role.contains(getLowerCaseString("doap.helper"))) {
                         if (!returnMap.get("helpers").contains(contributor)) {
                             returnMap.get("helpers").add(contributor);
                         }
-                    } else if (role.contains(getLowerCaseString(i18n, "doap.emeritus"))) {
+                    } else if (role.contains(getLowerCaseString("doap.emeritus"))) {
                         // Don't add as developer nor as contributor as the person is no longer involved
                     } else {
                         if (!returnMap.get("unknowns").contains(contributor)) {
@@ -610,8 +610,10 @@ public class DoapUtil {
      * @param key not null
      * @return lower case value for the key in the i18n bundle
      */
-    private static String getLowerCaseString(I18N i18n, String key) {
-        return i18n.getString("doap-person", Locale.ENGLISH, key).toLowerCase(Locale.ENGLISH);
+    private static String getLowerCaseString(String key) {
+        return ResourceBundle.getBundle("doap-person", Locale.ENGLISH)
+                .getString(key)
+                .toLowerCase(Locale.ENGLISH);
     }
 
     /**

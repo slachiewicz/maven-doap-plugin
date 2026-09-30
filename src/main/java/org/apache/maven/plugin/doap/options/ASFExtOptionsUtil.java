@@ -23,8 +23,8 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.maven.model.Developer;
-import org.apache.maven.project.MavenProject;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.model.Developer;
 import org.codehaus.plexus.util.StringUtils;
 
 /**
@@ -210,68 +210,73 @@ public class ASFExtOptionsUtil {
      * @see #APACHE_DOMAIN_NAME
      * @since 1.1
      */
-    public static boolean isASFProject(MavenProject project) {
+    public static boolean isASFProject(Project project) {
         if (project == null) {
             throw new IllegalArgumentException("project is required");
         }
 
         // check organization name
-        if (project.getOrganization() != null
-                && StringUtils.isNotEmpty(project.getOrganization().getName())
-                && project.getOrganization().getName().trim().equals("The Apache Software Foundation"))
+        if (project.getModel().getOrganization() != null
+                && StringUtils.isNotEmpty(project.getModel().getOrganization().getName())
+                && project.getModel().getOrganization().getName().trim().equals("The Apache Software Foundation"))
         // see org.apache:apache artifact
         {
             return true;
         }
 
         // check domain name
-        if (project.getOrganization() != null
-                && isHostedAtASF(project.getOrganization().getUrl())) {
+        if (project.getModel().getOrganization() != null
+                && isHostedAtASF(project.getModel().getOrganization().getUrl())) {
             return true;
         }
 
-        if (isHostedAtASF(project.getUrl())) {
+        if (isHostedAtASF(project.getModel().getUrl())) {
             return true;
         }
 
-        if (project.getScm() != null) {
-            if (StringUtils.isNotEmpty(project.getScm().getUrl())
-                    && project.getScm().getUrl().contains(APACHE_DOMAIN_NAME)) {
+        if (project.getModel().getScm() != null) {
+            if (StringUtils.isNotEmpty(project.getModel().getScm().getUrl())
+                    && project.getModel().getScm().getUrl().contains(APACHE_DOMAIN_NAME)) {
                 return true;
             }
 
-            if (StringUtils.isNotEmpty(project.getScm().getConnection())
-                    && project.getScm().getConnection().contains(APACHE_DOMAIN_NAME)) {
+            if (StringUtils.isNotEmpty(project.getModel().getScm().getConnection())
+                    && project.getModel().getScm().getConnection().contains(APACHE_DOMAIN_NAME)) {
                 return true;
             }
 
-            if (StringUtils.isNotEmpty(project.getScm().getDeveloperConnection())
-                    && project.getScm().getDeveloperConnection().contains(APACHE_DOMAIN_NAME)) {
+            if (StringUtils.isNotEmpty(project.getModel().getScm().getDeveloperConnection())
+                    && project.getModel().getScm().getDeveloperConnection().contains(APACHE_DOMAIN_NAME)) {
                 return true;
             }
         }
 
-        if (project.getDistributionManagement() != null) {
-            if (isHostedAtASF(project.getDistributionManagement().getDownloadUrl())) {
+        if (project.getModel().getDistributionManagement() != null) {
+            if (isHostedAtASF(project.getModel().getDistributionManagement().getDownloadUrl())) {
                 return true;
             }
 
-            if (project.getDistributionManagement().getRepository() != null
-                    && isHostedAtASF(
-                            project.getDistributionManagement().getRepository().getUrl())) {
+            if (project.getModel().getDistributionManagement().getRepository() != null
+                    && isHostedAtASF(project.getModel()
+                            .getDistributionManagement()
+                            .getRepository()
+                            .getUrl())) {
                 return true;
             }
 
-            if (project.getDistributionManagement().getSnapshotRepository() != null
-                    && isHostedAtASF(project.getDistributionManagement()
+            if (project.getModel().getDistributionManagement().getSnapshotRepository() != null
+                    && isHostedAtASF(project.getModel()
+                            .getDistributionManagement()
                             .getSnapshotRepository()
                             .getUrl())) {
                 return true;
             }
 
-            if (project.getDistributionManagement().getSite() != null
-                    && isHostedAtASF(
-                            project.getDistributionManagement().getSite().getUrl())) {
+            if (project.getModel().getDistributionManagement().getSite() != null
+                    && isHostedAtASF(project.getModel()
+                            .getDistributionManagement()
+                            .getSite()
+                            .getUrl())) {
                 return true;
             }
         }

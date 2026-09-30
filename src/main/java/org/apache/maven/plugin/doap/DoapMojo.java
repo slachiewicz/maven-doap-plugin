@@ -18,14 +18,17 @@
  */
 package org.apache.maven.plugin.doap;
 
-import javax.inject.Inject;
+import javax.xml.stream.XMLStreamException;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
+import java.io.StringReader;
 import java.io.Writer;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
+import java.nio.file.Path;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -38,66 +41,49 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
 
-import org.apache.maven.RepositoryUtils;
-import org.apache.maven.artifact.Artifact;
-import org.apache.maven.artifact.DefaultArtifact;
-import org.apache.maven.artifact.handler.manager.ArtifactHandlerManager;
-import org.apache.maven.artifact.repository.ArtifactRepository;
-import org.apache.maven.artifact.repository.metadata.Metadata;
-import org.apache.maven.artifact.repository.metadata.io.xpp3.MetadataXpp3Reader;
-import org.apache.maven.model.Contributor;
-import org.apache.maven.model.Developer;
-import org.apache.maven.model.License;
-import org.apache.maven.model.building.ModelBuildingRequest;
-import org.apache.maven.plugin.AbstractMojo;
-import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.api.Project;
+import org.apache.maven.api.RemoteRepository;
+import org.apache.maven.api.Session;
+import org.apache.maven.api.di.Inject;
+import org.apache.maven.api.metadata.Metadata;
+import org.apache.maven.api.model.Contributor;
+import org.apache.maven.api.model.Developer;
+import org.apache.maven.api.model.License;
+import org.apache.maven.api.plugin.Log;
+import org.apache.maven.api.plugin.MojoException;
+import org.apache.maven.api.plugin.annotations.Mojo;
+import org.apache.maven.api.plugin.annotations.Parameter;
+import org.apache.maven.api.services.ArtifactResolverException;
+import org.apache.maven.api.services.ProjectBuilder;
+import org.apache.maven.api.services.ProjectBuilderException;
+import org.apache.maven.api.services.ProjectBuilderRequest;
+import org.apache.maven.api.services.ProjectBuilderResult;
+import org.apache.maven.api.services.ProjectManager;
+import org.apache.maven.api.services.Transport;
+import org.apache.maven.api.services.TransportProvider;
+import org.apache.maven.metadata.v4.MetadataStaxReader;
 import org.apache.maven.plugin.doap.options.ASFExtOptions;
 import org.apache.maven.plugin.doap.options.ASFExtOptionsUtil;
 import org.apache.maven.plugin.doap.options.DoapArtifact;
 import org.apache.maven.plugin.doap.options.DoapOptions;
 import org.apache.maven.plugin.doap.options.ExtOptions;
 import org.apache.maven.plugin.doap.options.Standard;
-import org.apache.maven.plugins.annotations.Mojo;
-import org.apache.maven.plugins.annotations.Parameter;
-import org.apache.maven.project.DefaultProjectBuildingRequest;
-import org.apache.maven.project.MavenProject;
-import org.apache.maven.project.ProjectBuilder;
-import org.apache.maven.project.ProjectBuildingException;
-import org.apache.maven.project.ProjectBuildingRequest;
+import org.apache.maven.scm.manager.BasicScmManager;
 import org.apache.maven.scm.manager.NoSuchScmProviderException;
 import org.apache.maven.scm.manager.ScmManager;
 import org.apache.maven.scm.provider.svn.repository.SvnScmProviderRepository;
+import org.apache.maven.scm.provider.svn.svnexe.SvnExeScmProvider;
 import org.apache.maven.scm.repository.ScmRepository;
 import org.apache.maven.scm.repository.ScmRepositoryException;
-import org.apache.maven.settings.Settings;
-import org.codehaus.plexus.i18n.I18N;
 import org.codehaus.plexus.util.FileUtils;
 import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.xml.PrettyPrintXMLWriter;
 import org.codehaus.plexus.util.xml.XMLWriter;
-import org.codehaus.plexus.util.xml.XmlStreamReader;
 import org.codehaus.plexus.util.xml.XmlStreamWriter;
-import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
-import org.eclipse.aether.RepositorySystem;
-import org.eclipse.aether.RepositorySystemSession;
-import org.eclipse.aether.impl.RepositoryConnectorProvider;
-import org.eclipse.aether.metadata.DefaultMetadata;
-import org.eclipse.aether.metadata.Metadata.Nature;
-import org.eclipse.aether.repository.RemoteRepository;
-import org.eclipse.aether.repository.RepositoryPolicy;
-import org.eclipse.aether.resolution.ArtifactRequest;
-import org.eclipse.aether.resolution.ArtifactResolutionException;
-import org.eclipse.aether.resolution.MetadataRequest;
-import org.eclipse.aether.resolution.MetadataResult;
-import org.eclipse.aether.spi.connector.ArtifactDownload;
-import org.eclipse.aether.spi.connector.RepositoryConnector;
-import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
-import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
-import org.eclipse.aether.transfer.NoRepositoryConnectorException;
-import org.eclipse.aether.transfer.NoRepositoryLayoutException;
 
 /**
  * <p>
@@ -112,7 +98,7 @@ import org.eclipse.aether.transfer.NoRepositoryLayoutException;
  * @since 1.0-beta-1
  */
 @Mojo(name = "generate")
-public class DoapMojo extends AbstractMojo {
+public class DoapMojo implements org.apache.maven.api.plugin.Mojo {
     /**
      * UTC Time Zone.
      */
@@ -141,45 +127,49 @@ public class DoapMojo extends AbstractMojo {
     // ----------------------------------------------------------------------
 
     /**
-     * Maven SCM Manager.
-     *
-     * @since 1.0
+     * Logger.
      */
     @Inject
-    private ScmManager scmManager;
+    private Log log;
 
     /**
-     * Artifact handler manager, used to build {@link Artifact} instances directly instead of through the
-     * deprecated <code>ArtifactFactory</code> component.
-     *
-     * @since 1.0
+     * The current build session.
      */
     @Inject
-    private ArtifactHandlerManager artifactHandlerManager;
-
-    @Inject
-    private RepositorySystem repositorySystem;
-
-    /**
-     * Internationalization component.
-     *
-     * @since 1.0
-     */
-    @Inject
-    private I18N i18n;
-
-    // ----------------------------------------------------------------------
-    // Mojo parameters
-    // ----------------------------------------------------------------------
+    private Session session;
 
     /**
      * The POM from which information will be extracted to create a DOAP file.
      */
-    @Parameter(defaultValue = "${project}", readonly = true, required = true)
-    private MavenProject project;
+    @Inject
+    private Project project;
 
-    @Parameter(defaultValue = "${repositorySystemSession}", readonly = true)
-    private RepositorySystemSession repositorySystemSession;
+    /**
+     * Project builder, used to read the POM of the <code>artifact</code> parameter.
+     *
+     * @since 1.1
+     */
+    private ProjectBuilder projectBuilder;
+
+    /**
+     * Gives access to the remote repositories of the project. Not bound for injection in Maven 4.0.0-rc-7, so it is
+     * looked up from the session on first use. The project builder and the transport provider are looked up the
+     * same way, which also keeps the plugin usable in the test harness, where their implementations cannot be built.
+     */
+    private ProjectManager projectManager;
+
+    /**
+     * Reads <code>maven-metadata.xml</code> and release artifacts from remote repositories.
+     */
+    private TransportProvider transportProvider;
+
+    /**
+     * Maven SCM Manager, only used to recognise Subversion URLs. The SCM providers other than Subversion are not on
+     * the classpath, so any other URL is written as a generic DOAP repository.
+     *
+     * @since 1.0
+     */
+    private ScmManager scmManager = createScmManager();
 
     /**
      * The name of the DOAP file that will be generated.
@@ -192,34 +182,8 @@ public class DoapMojo extends AbstractMojo {
      *
      * @since 1.1
      */
-    @Parameter(defaultValue = "${project.reporting.outputDirectory}", required = true)
+    @Parameter(defaultValue = "${project.reporting.outputDirectory}")
     private String outputDirectory;
-
-    /**
-     * The local repository where the artifacts are located.
-     *
-     * @since 1.0
-     */
-    @Parameter(defaultValue = "${localRepository}", required = true, readonly = true)
-    private ArtifactRepository localRepository;
-
-    /**
-     * The remote repositories where the artifacts are located, in the legacy form required by
-     * {@link org.apache.maven.project.ProjectBuildingRequest#setRemoteRepositories(List)}: that API has no
-     * aether-native overload, so this one stays deprecated-typed.
-     *
-     * @since 1.0
-     */
-    @Parameter(defaultValue = "${project.remoteArtifactRepositories}", required = true, readonly = true)
-    private List<ArtifactRepository> projectBuildingRepositories;
-
-    /**
-     * The remote repositories where the artifacts are located.
-     *
-     * @since 1.0
-     */
-    @Parameter(defaultValue = "${project.remoteProjectRepositories}", required = true, readonly = true)
-    private List<RemoteRepository> remoteRepositories;
 
     /**
      * The classifier of the artifact to reference as <code>doap:file-release</code>, e.g.
@@ -239,28 +203,6 @@ public class DoapMojo extends AbstractMojo {
      */
     @Parameter(property = "fileReleaseType")
     private String fileReleaseType;
-
-    @Inject
-    private RepositoryConnectorProvider connectorProvider;
-
-    @Inject
-    private RepositoryLayoutProvider repositoryLayoutProvider;
-
-    /**
-     * Project builder.
-     *
-     * @since 1.1
-     */
-    @Inject
-    private ProjectBuilder projectBuilder;
-
-    /**
-     * The current user system settings for use in Maven.
-     *
-     * @since 1.1
-     */
-    @Parameter(defaultValue = "${settings}", readonly = true, required = true)
-    protected Settings settings;
 
     // ----------------------------------------------------------------------
     // Doap options
@@ -325,7 +267,7 @@ public class DoapMojo extends AbstractMojo {
      *      http://svn.apache.org/repos/asf/infrastructure/site-tools/trunk/projects/asfext</a>
      * @see <a href="http://projects.apache.org/docs/pmc.html">http://projects.apache.org/docs/pmc.html</a>
      * @see <a href="http://projects.apache.org/docs/standards.html">http://projects.apache.org/docs/standards.html</a>
-     * @see ASFExtOptionsUtil#isASFProject(MavenProject)
+     * @see ASFExtOptionsUtil#isASFProject(Project)
      * @since 1.0
      */
     @Parameter(property = "asfExtOptions")
@@ -434,7 +376,50 @@ public class DoapMojo extends AbstractMojo {
     /**
      * {@inheritDoc}
      */
-    public void execute() throws MojoExecutionException {
+    /**
+     * The output directory as a file. Maven 3 always gave <code>${project.reporting.outputDirectory}</code> the value
+     * <code>${project.build.directory}/site</code>; Maven 4 leaves it empty unless the POM sets it, so that default is
+     * applied here.
+     */
+    private File getOutputDirectory() {
+        String directory = outputDirectory;
+        if (StringUtils.isEmpty(directory)) {
+            directory = project.getBuild().getDirectory() + "/site";
+        }
+        File outDir = new File(directory);
+        if (!outDir.isAbsolute()) {
+            outDir = new File(project.getBasedir().toFile(), directory);
+        }
+        return outDir;
+    }
+
+    private Log getLog() {
+        return log;
+    }
+
+    private ProjectBuilder getProjectBuilder() {
+        if (projectBuilder == null) {
+            projectBuilder = session.getService(ProjectBuilder.class);
+        }
+        return projectBuilder;
+    }
+
+    private TransportProvider getTransportProvider() {
+        if (transportProvider == null) {
+            transportProvider = session.getService(TransportProvider.class);
+        }
+        return transportProvider;
+    }
+
+    private ProjectManager getProjectManager() {
+        if (projectManager == null) {
+            projectManager = session.getService(ProjectManager.class);
+        }
+        return projectManager;
+    }
+
+    @Override
+    public void execute() throws MojoException {
         if (skip) {
             getLog().info("Skipping DOAP generation");
             return;
@@ -442,12 +427,9 @@ public class DoapMojo extends AbstractMojo {
 
         // single artifact
         if (artifact != null) {
-            MavenProject givenProject = getMavenProject(artifact);
+            Project givenProject = getMavenProject(artifact);
             if (givenProject != null) {
-                File outDir = new File(outputDirectory);
-                if (!outDir.isAbsolute()) {
-                    outDir = new File(project.getBasedir(), outputDirectory);
-                }
+                File outDir = getOutputDirectory();
                 File outFile = new File(outDir, artifact.getDoapFileName());
                 writeDoapFile(givenProject, outFile);
                 return;
@@ -457,14 +439,10 @@ public class DoapMojo extends AbstractMojo {
         // current project
         File outFile = new File(doapFile);
         if (!outFile.isAbsolute()) {
-            outFile = new File(project.getBasedir(), doapFile);
+            outFile = new File(project.getBasedir().toFile(), doapFile);
         }
         if (!doapFile.replaceAll("\\\\", "/").contains("/")) {
-            File outDir = new File(outputDirectory);
-            if (!outDir.isAbsolute()) {
-                outDir = new File(project.getBasedir(), outputDirectory);
-            }
-            outFile = new File(outDir, doapFile);
+            outFile = new File(getOutputDirectory(), doapFile);
         }
         writeDoapFile(project, outFile);
     }
@@ -478,7 +456,7 @@ public class DoapMojo extends AbstractMojo {
      * @return the maven project for the given doap artifact
      * @since 1.1
      */
-    private MavenProject getMavenProject(DoapArtifact artifact) {
+    private Project getMavenProject(DoapArtifact artifact) {
         if (artifact == null) {
             return null;
         }
@@ -494,39 +472,35 @@ public class DoapMojo extends AbstractMojo {
                 + artifact.getVersion());
 
         try {
-            Artifact art = new DefaultArtifact(
-                    artifact.getGroupId(),
-                    artifact.getArtifactId(),
-                    artifact.getVersion(),
-                    Artifact.SCOPE_COMPILE,
-                    "pom",
-                    null,
-                    artifactHandlerManager.getArtifactHandler("pom"));
+            List<RemoteRepository> repositories = getProjectManager().getRemoteProjectRepositories(project);
 
-            if (art.getFile() == null) {
-                ProjectBuildingRequest request = new DefaultProjectBuildingRequest();
-                request.setRepositorySession(repositorySystemSession);
-                request.setLocalRepository(localRepository);
-                request.setRemoteRepositories(projectBuildingRepositories);
-                request.setProcessPlugins(false);
-                request.setValidationLevel(ModelBuildingRequest.VALIDATION_LEVEL_MINIMAL);
+            // the v4 ProjectBuilder reads a POM file or source, not coordinates, so resolve the POM first. Build it
+            // from
+            // the path: a build from a Source returns no Project, since the POM has no base directory.
+            Path pom = session.resolveArtifact(
+                            session.createArtifactCoordinates(
+                                    artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion(), "pom"),
+                            repositories)
+                    .getPath();
 
-                MavenProject proj = projectBuilder.build(art, true, request).getProject();
-                art = proj.getArtifact();
+            ProjectBuilderRequest request = ProjectBuilderRequest.builder()
+                    .session(session)
+                    .path(pom)
+                    .processPlugins(false)
+                    .repositories(repositories)
+                    .build();
 
-                art.setFile(repositorySystem
-                        .resolveArtifact(
-                                repositorySystemSession,
-                                new ArtifactRequest(RepositoryUtils.toArtifact(art), remoteRepositories, null))
-                        .getArtifact()
-                        .getFile());
-
-                return proj;
+            ProjectBuilderResult result = getProjectBuilder().build(request);
+            if (!result.getProject().isPresent()) {
+                getLog().error("No project could be built from " + pom + ": " + result.getProblems()
+                        + "\nIgnored <artifact/> parameter.");
+                return null;
             }
-        } catch (ArtifactResolutionException e) {
-            getLog().error("ArtifactResolutionException: " + e.getMessage() + "\nIgnored <artifact/> parameter.");
-        } catch (ProjectBuildingException e) {
-            getLog().error("ProjectBuildingException: " + e.getMessage() + "\nIgnored <artifact/> parameter.");
+            return result.getProject().get();
+        } catch (ArtifactResolverException e) {
+            getLog().error("ArtifactResolverException: " + e.getMessage() + "\nIgnored <artifact/> parameter.");
+        } catch (ProjectBuilderException e) {
+            getLog().error("ProjectBuilderException: " + e.getMessage() + "\nIgnored <artifact/> parameter.");
         }
 
         return null;
@@ -539,7 +513,7 @@ public class DoapMojo extends AbstractMojo {
      * @param outputFile not null
      * @since 1.1
      */
-    private void writeDoapFile(MavenProject project, File outputFile) throws MojoExecutionException {
+    private void writeDoapFile(Project project, File outputFile) throws MojoException {
         // ----------------------------------------------------------------------------
         // Includes ASF extensions
         // ----------------------------------------------------------------------------
@@ -561,7 +535,7 @@ public class DoapMojo extends AbstractMojo {
 
             w = new XmlStreamWriter(outputFile);
         } catch (IOException e) {
-            throw new MojoExecutionException("Error creating DOAP file " + outputFile.getAbsolutePath(), e);
+            throw new MojoException("Error creating DOAP file " + outputFile.getAbsolutePath(), e);
         }
 
         try {
@@ -571,7 +545,7 @@ public class DoapMojo extends AbstractMojo {
             try {
                 w.close();
             } catch (IOException e) {
-                throw new MojoExecutionException("Error when closing the writer.", e);
+                throw new MojoException("Error when closing the writer.", e);
             }
         }
 
@@ -592,7 +566,7 @@ public class DoapMojo extends AbstractMojo {
                 getLog().error("For more information about the errors and possible solutions, "
                         + "please read the plugin documentation:");
                 getLog().error("http://maven.apache.org/plugins/maven-doap-plugin/usage.html#DOAP_ASF_Configuration");
-                throw new MojoExecutionException("The generated DOAP doesn't respect ASF rules, see above.");
+                throw new MojoException("The generated DOAP doesn't respect ASF rules, see above.");
             }
         }
 
@@ -605,12 +579,12 @@ public class DoapMojo extends AbstractMojo {
                 }
                 getLog().error("");
 
-                throw new MojoExecutionException("Error parsing the generated DOAP file, see above.");
+                throw new MojoException("Error parsing the generated DOAP file, see above.");
             }
         }
     }
     // CHECKSTYLE_OFF: MethodLength
-    private void doWrite(MavenProject project, File outputFile, Writer w) throws MojoExecutionException {
+    private void doWrite(Project project, File outputFile, Writer w) throws MojoException {
         if (asfExtOptions.isIncluded()) {
             getLog().info("Generating an ASF DOAP file " + outputFile.getAbsolutePath());
         } else {
@@ -629,12 +603,12 @@ public class DoapMojo extends AbstractMojo {
         DoapUtil.writeStartElement(writer, "rdf", "RDF");
         if (Arrays.binarySearch(Locale.getISOLanguages(), lang) < 0) {
             messages.addMessage(new String[] {"doapOptions", "lang"}, lang, UserMessages.INVALID_ISO_DATE);
-            throw new MojoExecutionException(messages.getErrorMessages().get(0));
+            throw new MojoException(messages.getErrorMessages().get(0));
         }
         writer.addAttribute("xml:lang", lang);
         if (StringUtils.isEmpty(doapOptions.getXmlnsNamespaceURI())) {
             messages.addMessage(new String[] {"doapOptions", "xmlnsNamespaceURI"}, null, UserMessages.REQUIRED);
-            throw new MojoExecutionException(messages.getErrorMessages().get(0));
+            throw new MojoException(messages.getErrorMessages().get(0));
         }
         writer.addAttribute(
                 "xmlns" + (StringUtils.isEmpty(doapOptions.getXmlnsPrefix()) ? "" : ":" + doapOptions.getXmlnsPrefix()),
@@ -644,7 +618,7 @@ public class DoapMojo extends AbstractMojo {
         if (asfExtOptions.isIncluded()) {
             if (StringUtils.isEmpty(asfExtOptions.getXmlnsPrefix())) {
                 messages.addMessage(new String[] {"doapOptions", "xmlnsPrefix"}, null, UserMessages.REQUIRED);
-                throw new MojoExecutionException(messages.getErrorMessages().get(0));
+                throw new MojoException(messages.getErrorMessages().get(0));
             }
             if (StringUtils.isEmpty(asfExtOptions.getXmlnsNamespaceURI())) {
                 messages.addMessage(new String[] {"doapOptions", "xmlnsNamespaceURI"}, null, UserMessages.REQUIRED);
@@ -663,12 +637,12 @@ public class DoapMojo extends AbstractMojo {
                 if (StringUtils.isEmpty(extOption.getXmlnsPrefix())) {
                     messages.addMessage(
                             new String[] {"extOptions", "extOption", "xmlnsPrefix"}, null, UserMessages.REQUIRED);
-                    throw new MojoExecutionException(messages.getErrorMessages().get(0));
+                    throw new MojoException(messages.getErrorMessages().get(0));
                 }
                 if (StringUtils.isEmpty(extOption.getXmlnsNamespaceURI())) {
                     messages.addMessage(
                             new String[] {"extOptions", "extOption", "xmlnsNamespaceURI"}, null, UserMessages.REQUIRED);
-                    throw new MojoExecutionException(messages.getErrorMessages().get(0));
+                    throw new MojoException(messages.getErrorMessages().get(0));
                 }
                 writer.addAttribute(
                         "xmlns"
@@ -683,7 +657,7 @@ public class DoapMojo extends AbstractMojo {
         DoapUtil.writeStartElement(writer, doapOptions.getXmlnsPrefix(), "Project");
         boolean added = false;
         if (artifact != null) {
-            String about = project.getUrl();
+            String about = project.getModel().getUrl();
 
             if (about != null && !about.isEmpty()) {
                 try {
@@ -787,11 +761,11 @@ public class DoapMojo extends AbstractMojo {
         writeReleases(writer, project);
 
         // Developers
-        List<Developer> developers = project.getDevelopers();
+        List<Developer> developers = project.getModel().getDevelopers();
         writeContributors(writer, new ArrayList<Contributor>(developers));
 
         // Contributors
-        List<Contributor> contributors = project.getContributors();
+        List<Contributor> contributors = new ArrayList<>(project.getModel().getContributors());
         writeContributors(writer, contributors);
 
         // Extra DOAP
@@ -818,8 +792,8 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#name">http://usefulinc.com/ns/doap#name</a>
      */
-    private void writeName(XMLWriter writer, MavenProject project) {
-        String name = DoapUtil.interpolate(doapOptions.getName(), project, settings);
+    private void writeName(XMLWriter writer, Project project) {
+        String name = DoapUtil.interpolate(doapOptions.getName(), project, session.getSettings());
         if (name == null || name.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "name"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -842,9 +816,9 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#description">http://usefulinc.com/ns/doap#description</a>
      * @see <a href="http://usefulinc.com/ns/doap#shortdesc">http://usefulinc.com/ns/doap#shortdesc</a>
      */
-    private void writeDescription(XMLWriter writer, MavenProject project) {
+    private void writeDescription(XMLWriter writer, Project project) {
         boolean addComment = false;
-        String description = DoapUtil.interpolate(doapOptions.getDescription(), project, settings);
+        String description = DoapUtil.interpolate(doapOptions.getDescription(), project, session.getSettings());
         if (description == null || description.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "description"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -855,7 +829,7 @@ public class DoapMojo extends AbstractMojo {
         }
 
         String comment = "Short plain text description of a project.";
-        String shortdesc = DoapUtil.interpolate(doapOptions.getShortdesc(), project, settings);
+        String shortdesc = DoapUtil.interpolate(doapOptions.getShortdesc(), project, session.getSettings());
         if (shortdesc == null || shortdesc.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "shortdesc"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -887,8 +861,8 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#created">http://usefulinc.com/ns/doap#created</a>
      */
-    private void writeCreated(XMLWriter writer, MavenProject project) {
-        String created = DoapUtil.interpolate(doapOptions.getCreated(), project, settings);
+    private void writeCreated(XMLWriter writer, Project project) {
+        String created = DoapUtil.interpolate(doapOptions.getCreated(), project, session.getSettings());
         if (created == null || created.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "created"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -914,8 +888,8 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#homepage">http://usefulinc.com/ns/doap#homepage</a>
      * @see <a href="http://usefulinc.com/ns/doap#old-homepage">http://usefulinc.com/ns/doap#old-homepage</a>
      */
-    private void writeHomepage(XMLWriter writer, MavenProject project) {
-        String homepage = DoapUtil.interpolate(doapOptions.getHomepage(), project, settings);
+    private void writeHomepage(XMLWriter writer, Project project) {
+        String homepage = DoapUtil.interpolate(doapOptions.getHomepage(), project, session.getSettings());
         if (homepage == null || homepage.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "homepage"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -931,7 +905,7 @@ public class DoapMojo extends AbstractMojo {
         }
 
         if (StringUtils.isNotEmpty(doapOptions.getOldHomepage())) {
-            String oldHomepage = DoapUtil.interpolate(doapOptions.getOldHomepage(), project, settings);
+            String oldHomepage = DoapUtil.interpolate(doapOptions.getOldHomepage(), project, session.getSettings());
             if (oldHomepage == null || oldHomepage.isEmpty()) {
                 return;
             }
@@ -955,7 +929,7 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#programming-language">
      *      http://usefulinc.com/ns/doap#programming-language</a>
      */
-    private void writeProgrammingLanguage(XMLWriter writer, MavenProject project) {
+    private void writeProgrammingLanguage(XMLWriter writer, Project project) {
         if (StringUtils.isEmpty(doapOptions.getProgrammingLanguage()) && (language == null || language.isEmpty())) {
             messages.addMessage(
                     new String[] {"doapOptions", "programmingLanguage"},
@@ -1035,7 +1009,7 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#category">http://usefulinc.com/ns/doap#category</a>
      */
-    private void writeCategory(XMLWriter writer, MavenProject project) {
+    private void writeCategory(XMLWriter writer, Project project) {
         if (StringUtils.isEmpty(doapOptions.getCategory()) && (category == null || category.isEmpty())) {
             messages.addMessage(
                     new String[] {"doapOptions", "category"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -1119,8 +1093,8 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#download-page">http://usefulinc.com/ns/doap#download-page</a>
      * @see <a href="http://usefulinc.com/ns/doap#download-mirror">http://usefulinc.com/ns/doap#download-mirror</a>
      */
-    private void writeDownloadPage(XMLWriter writer, MavenProject project) {
-        String downloadPage = DoapUtil.interpolate(doapOptions.getDownloadPage(), project, settings);
+    private void writeDownloadPage(XMLWriter writer, Project project) {
+        String downloadPage = DoapUtil.interpolate(doapOptions.getDownloadPage(), project, session.getSettings());
         if (downloadPage == null || downloadPage.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "downloadPage"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -1166,8 +1140,8 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#os">http://usefulinc.com/ns/doap#os</a>
      */
-    private void writeOS(XMLWriter writer, MavenProject project) {
-        String osList = DoapUtil.interpolate(doapOptions.getOs(), project, settings);
+    private void writeOS(XMLWriter writer, Project project) {
+        String osList = DoapUtil.interpolate(doapOptions.getOs(), project, session.getSettings());
         if (osList == null || osList.isEmpty()) {
             return;
         }
@@ -1186,8 +1160,8 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#screenshots">http://usefulinc.com/ns/doap#screenshots</a>
      */
-    private void writeScreenshots(XMLWriter writer, MavenProject project) {
-        String screenshots = DoapUtil.interpolate(doapOptions.getScreenshots(), project, settings);
+    private void writeScreenshots(XMLWriter writer, Project project) {
+        String screenshots = DoapUtil.interpolate(doapOptions.getScreenshots(), project, session.getSettings());
         if (screenshots == null || screenshots.isEmpty()) {
             return;
         }
@@ -1211,8 +1185,8 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#wiki">http://usefulinc.com/ns/doap#wiki</a>
      */
-    private void writeWiki(XMLWriter writer, MavenProject project) {
-        String wiki = DoapUtil.interpolate(doapOptions.getWiki(), project, settings);
+    private void writeWiki(XMLWriter writer, Project project) {
+        String wiki = DoapUtil.interpolate(doapOptions.getWiki(), project, session.getSettings());
         if (wiki == null || wiki.isEmpty()) {
             return;
         }
@@ -1236,12 +1210,12 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#license">http://usefulinc.com/ns/doap#license</a>
      */
-    private void writeLicenses(XMLWriter writer, MavenProject project) {
-        String license = DoapUtil.interpolate(doapOptions.getLicense(), project, settings);
+    private void writeLicenses(XMLWriter writer, Project project) {
+        String license = DoapUtil.interpolate(doapOptions.getLicense(), project, session.getSettings());
         if (license == null || license.isEmpty()) {
             boolean added = false;
             @SuppressWarnings("unchecked")
-            List<License> licenses = project.getLicenses();
+            List<License> licenses = project.getModel().getLicenses();
             if (licenses.size() > 1) {
                 for (int i = 1; i < licenses.size(); i++) {
                     if (StringUtils.isEmpty(licenses.get(i).getUrl())) {
@@ -1287,8 +1261,8 @@ public class DoapMojo extends AbstractMojo {
      * @param project the Maven project, not null
      * @see <a href="http://usefulinc.com/ns/doap#bug-database">http://usefulinc.com/ns/doap#bug-database</a>
      */
-    private void writeBugDatabase(XMLWriter writer, MavenProject project) {
-        String bugDatabase = DoapUtil.interpolate(doapOptions.getBugDatabase(), project, settings);
+    private void writeBugDatabase(XMLWriter writer, Project project) {
+        String bugDatabase = DoapUtil.interpolate(doapOptions.getBugDatabase(), project, session.getSettings());
         if (bugDatabase == null || bugDatabase.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "bugDatabase"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -1313,8 +1287,8 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#mailing-list">http://usefulinc.com/ns/doap#mailing-list</a>
      * @see DoapOptions#getMailingList()
      */
-    private void writeMailingList(XMLWriter writer, MavenProject project) {
-        String ml = DoapUtil.interpolate(doapOptions.getMailingList(), project, settings);
+    private void writeMailingList(XMLWriter writer, Project project) {
+        String ml = DoapUtil.interpolate(doapOptions.getMailingList(), project, session.getSettings());
         if (ml == null || ml.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "mailingList"}, null, UserMessages.REQUIRED_BY_ASF_OR_RECOMMENDED);
@@ -1336,18 +1310,20 @@ public class DoapMojo extends AbstractMojo {
      *
      * @param writer  not null
      * @param project the Maven project, not null
-     * @throws MojoExecutionException if any
+     * @throws MojoException if any
      * @see <a href="http://usefulinc.com/ns/doap#release">http://usefulinc.com/ns/doap#release</a>
      * @see <a href="http://usefulinc.com/ns/doap#Version">http://usefulinc.com/ns/doap#Version</a>
      */
-    private void writeReleases(XMLWriter writer, MavenProject project) throws MojoExecutionException {
+    private void writeReleases(XMLWriter writer, Project project) throws MojoException {
         Metadata metadata = null;
 
+        List<RemoteRepository> remoteRepositories = getProjectManager().getRemoteProjectRepositories(this.project);
+
         for (RemoteRepository repo : remoteRepositories) {
-            if (repo.getPolicy(true).isEnabled()) {
+            if (isPolicyEnabled(repo, true)) {
                 continue;
             }
-            if (repo.getPolicy(false).isEnabled()) {
+            if (isPolicyEnabled(repo, false)) {
                 metadata = resolveVersioningMetadata(project, repo);
                 break;
             }
@@ -1360,7 +1336,8 @@ public class DoapMojo extends AbstractMojo {
             return;
         }
 
-        List<String> versions = metadata.getVersioning().getVersions();
+        // the model of the metadata is immutable
+        List<String> versions = new ArrayList<>(metadata.getVersioning().getVersions());
 
         // Recent releases in first
         Collections.reverse(versions);
@@ -1376,38 +1353,22 @@ public class DoapMojo extends AbstractMojo {
             DoapUtil.writeStartElement(writer, doapOptions.getXmlnsPrefix(), "Version");
 
             DoapUtil.writeStartElement(writer, doapOptions.getXmlnsPrefix(), "name");
-            writer.writeText(project.getName() + " - " + version);
+            writer.writeText(project.getModel().getName() + " - " + version);
             writer.endElement(); // name
 
             DoapUtil.writeElement(writer, doapOptions.getXmlnsPrefix(), "revision", version);
 
             // list all file release from all remote repos
             for (RemoteRepository repo : remoteRepositories) {
-                String type = StringUtils.isNotEmpty(fileReleaseType) ? fileReleaseType : project.getPackaging();
+                String type = StringUtils.isNotEmpty(fileReleaseType)
+                        ? fileReleaseType
+                        : project.getModel().getPackaging();
                 String classifier = StringUtils.isNotEmpty(fileReleaseClassifier) ? fileReleaseClassifier : null;
-                Artifact artifactRelease = new DefaultArtifact(
-                        project.getGroupId(),
-                        project.getArtifactId(),
-                        version,
-                        null,
-                        type,
-                        classifier,
-                        artifactHandlerManager.getArtifactHandler(type));
-                org.eclipse.aether.artifact.Artifact aetherArtifactRelease =
-                        RepositoryUtils.toArtifact(artifactRelease);
+                String location = getDefaultLayoutLocation(project, version, classifier, type);
+                String fileRelease = repo.getUrl() + "/" + location;
 
-                String fileRelease;
-                try {
-                    RepositoryLayout layout =
-                            repositoryLayoutProvider.newRepositoryLayout(repositorySystemSession, repo);
-                    fileRelease = repo.getUrl() + "/" + layout.getLocation(aetherArtifactRelease, false);
-                } catch (NoRepositoryLayoutException e) {
-                    getLog().debug("No repository layout for " + repo + ", skipped.", e);
-                    continue;
-                }
-
-                if (!isArtifactInRepository(aetherArtifactRelease, repo)) {
-                    getLog().debug(artifactRelease + " is not in the repository " + repo);
+                if (!isArtifactInRepository(location, repo)) {
+                    getLog().debug(location + " is not in the repository " + repo.getId());
                     continue;
                 }
 
@@ -1444,74 +1405,101 @@ public class DoapMojo extends AbstractMojo {
     }
 
     /**
-     * Fetch the release versioning metadata of the given project from the given repository, always going to the
-     * remote repository rather than trusting whatever the local repository already holds.
+     * Whether the given repository serves releases or snapshots. The Maven 4 API exposes no repository policy on
+     * {@link RemoteRepository}, so the policies are read from the repository of the same id in the effective model
+     * of the project. A repository that is not declared there, such as a mirror or a repository from
+     * {@code settings.xml}, is taken as serving releases only.
+     *
+     * @param repository not null
+     * @param snapshots  true for the snapshot policy, false for the release policy
+     * @return true if the policy is enabled
+     */
+    private boolean isPolicyEnabled(RemoteRepository repository, boolean snapshots) {
+        for (org.apache.maven.api.model.Repository declared : project.getModel().getRepositories()) {
+            if (repository.getId().equals(declared.getId())) {
+                org.apache.maven.api.model.RepositoryPolicy policy =
+                        snapshots ? declared.getSnapshots() : declared.getReleases();
+                return policy == null || policy.isEnabled();
+            }
+        }
+        return !snapshots;
+    }
+
+    /**
+     * The location of an artifact in a repository using the default layout, relative to the repository URL. The
+     * Maven 4 API has no repository layout service, and Maven has no other layout.
+     */
+    private String getDefaultLayoutLocation(Project project, String version, String classifier, String type) {
+        String extension;
+        try {
+            extension = session.requireType(type).getExtension();
+        } catch (RuntimeException e) {
+            // unknown type, which Maven 3 handled with a default artifact handler whose extension is the type
+            extension = type;
+        }
+
+        StringBuilder location = new StringBuilder()
+                .append(project.getGroupId().replace('.', '/'))
+                .append('/')
+                .append(project.getArtifactId())
+                .append('/')
+                .append(version)
+                .append('/')
+                .append(project.getArtifactId())
+                .append('-')
+                .append(version);
+        if (classifier != null) {
+            location.append('-').append(classifier);
+        }
+        return location.append('.').append(extension).toString();
+    }
+
+    /**
+     * Fetch the release versioning metadata of the given project from the given repository.
      *
      * @param project    the Maven project, not null
      * @param repository the repository to read the metadata from, not null
      * @return the parsed maven-metadata.xml, or null if the repository does not carry one
-     * @throws MojoExecutionException if the metadata could not be retrieved or parsed
+     * @throws MojoException if the metadata could not be retrieved or parsed
      */
-    private Metadata resolveVersioningMetadata(MavenProject project, RemoteRepository repository)
-            throws MojoExecutionException {
-        RemoteRepository remoteRepository = new RemoteRepository.Builder(repository)
-                .setPolicy(new RepositoryPolicy(
-                        true, RepositoryPolicy.UPDATE_POLICY_ALWAYS, RepositoryPolicy.CHECKSUM_POLICY_WARN))
-                .build();
+    private Metadata resolveVersioningMetadata(Project project, RemoteRepository repository) throws MojoException {
+        String location =
+                project.getGroupId().replace('.', '/') + "/" + project.getArtifactId() + "/maven-metadata.xml";
 
-        MetadataRequest request = new MetadataRequest(
-                new DefaultMetadata(
-                        project.getGroupId(), project.getArtifactId(), "maven-metadata.xml", Nature.RELEASE),
-                remoteRepository,
-                null);
-        request.setFavorLocalRepository(false);
-
-        MetadataResult result = repositorySystem
-                .resolveMetadata(repositorySystemSession, Collections.singletonList(request))
-                .get(0);
-
-        // a repository that simply carries no metadata for this project is not an error
-        if (result.getException() != null && !result.isMissing()) {
-            throw new MojoExecutionException(
+        Optional<String> content;
+        try (Transport transport = getTransportProvider().transport(session, repository)) {
+            content = transport.getString(URI.create(location));
+        } catch (IOException | RuntimeException e) {
+            throw new MojoException(
                     project.getGroupId() + ":" + project.getArtifactId()
                             + " metadata could not be retrieved from repository " + repository.getId()
-                            + " due to an error: " + result.getException().getMessage(),
-                    result.getException());
+                            + " due to an error: " + e.getMessage(),
+                    e);
         }
 
-        File file = result.getMetadata() == null ? null : result.getMetadata().getFile();
-        if (file == null || !file.exists()) {
+        // a repository that simply carries no metadata for this project is not an error
+        if (!content.isPresent()) {
             return null;
         }
 
-        try (Reader reader = new XmlStreamReader(file)) {
-            return new MetadataXpp3Reader().read(reader, false);
-        } catch (IOException | XmlPullParserException e) {
-            throw new MojoExecutionException(
+        try (Reader reader = new StringReader(content.get())) {
+            return new MetadataStaxReader().read(reader, false);
+        } catch (IOException | XMLStreamException e) {
+            throw new MojoException(
                     project.getGroupId() + ":" + project.getArtifactId() + " metadata could not be parsed: "
                             + e.getMessage(),
                     e);
         }
     }
 
-    private boolean isArtifactInRepository(org.eclipse.aether.artifact.Artifact artifact, RemoteRepository repository) {
-        return artifactExistsRemotely(artifact, repository);
-    }
-
     /**
-     * Check if an artifact exists in a remote repo without downloading it.
+     * Check if an artifact exists in a remote repo. The Maven 4 transport has no existence check, so this reads the
+     * SHA-1 checksum next to the artifact, which repositories publish for every artifact, instead of the artifact.
      */
-    private boolean artifactExistsRemotely(org.eclipse.aether.artifact.Artifact artifact, RemoteRepository repository) {
-        try (RepositoryConnector connector =
-                connectorProvider.newRepositoryConnector(this.repositorySystemSession, repository)) {
-            ArtifactDownload download = new ArtifactDownload(artifact, null, null, null);
-            download.setExistenceCheck(true);
-
-            connector.get(Collections.singleton(download), null);
-
-            return download.getException() == null;
-
-        } catch (NoRepositoryConnectorException e) {
+    private boolean isArtifactInRepository(String location, RemoteRepository repository) {
+        try (Transport transport = getTransportProvider().transport(session, repository)) {
+            return transport.getBytes(URI.create(location + ".sha1")).isPresent();
+        } catch (IOException | RuntimeException e) {
             return false;
         }
     }
@@ -1524,8 +1512,9 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#Repository">http://usefulinc.com/ns/doap#Repository</a>
      * @see <a href="http://usefulinc.com/ns/doap#SVNRepository">http://usefulinc.com/ns/doap#SVNRepository</a>
      */
-    private void writeSourceRepositories(XMLWriter writer, MavenProject project) {
-        String anonymousConnection = DoapUtil.interpolate(doapOptions.getScmAnonymous(), project, settings);
+    private void writeSourceRepositories(XMLWriter writer, Project project) {
+        String anonymousConnection =
+                DoapUtil.interpolate(doapOptions.getScmAnonymous(), project, session.getSettings());
         if (anonymousConnection == null || anonymousConnection.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "scmAnonymousConnection"},
@@ -1547,7 +1536,7 @@ public class DoapMojo extends AbstractMojo {
             }
         }
 
-        String devConnection = DoapUtil.interpolate(doapOptions.getScmDeveloper(), project, settings);
+        String devConnection = DoapUtil.interpolate(doapOptions.getScmDeveloper(), project, session.getSettings());
         if (devConnection == null || devConnection.isEmpty()) {
             messages.addMessage(
                     new String[] {"doapOptions", "scmDeveloperConnection"},
@@ -1588,7 +1577,7 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#Repository">http://usefulinc.com/ns/doap#Repository</a>
      * @see <a href="http://usefulinc.com/ns/doap#SVNRepository">http://usefulinc.com/ns/doap#SVNRepository</a>
      */
-    private void writeSourceRepository(XMLWriter writer, MavenProject project, String connection) {
+    private void writeSourceRepository(XMLWriter writer, Project project, String connection) {
         ScmRepository repository = getScmRepository(connection);
 
         DoapUtil.writeStartElement(writer, doapOptions.getXmlnsPrefix(), "repository");
@@ -1615,7 +1604,10 @@ public class DoapMojo extends AbstractMojo {
         }
 
         DoapUtil.writeRdfResourceElement(
-                writer, doapOptions.getXmlnsPrefix(), "browse", project.getScm().getUrl());
+                writer,
+                doapOptions.getXmlnsPrefix(),
+                "browse",
+                project.getModel().getScm().getUrl());
 
         writer.endElement(); // SVNRepository || Repository
         writer.endElement(); // repository
@@ -1640,13 +1632,13 @@ public class DoapMojo extends AbstractMojo {
             DoapUtil.writeComment(writer, "Contributed persons.");
         }
 
-        List<Contributor> maintainers = DoapUtil.getContributorsWithMaintainerRole(i18n, contributors);
-        List<Contributor> developers = DoapUtil.getContributorsWithDeveloperRole(i18n, contributors);
-        List<Contributor> documenters = DoapUtil.getContributorsWithDocumenterRole(i18n, contributors);
-        List<Contributor> translators = DoapUtil.getContributorsWithTranslatorRole(i18n, contributors);
-        List<Contributor> testers = DoapUtil.getContributorsWithTesterRole(i18n, contributors);
-        List<Contributor> helpers = DoapUtil.getContributorsWithHelperRole(i18n, contributors);
-        List<Contributor> unknowns = DoapUtil.getContributorsWithUnknownRole(i18n, contributors);
+        List<Contributor> maintainers = DoapUtil.getContributorsWithMaintainerRole(contributors);
+        List<Contributor> developers = DoapUtil.getContributorsWithDeveloperRole(contributors);
+        List<Contributor> documenters = DoapUtil.getContributorsWithDocumenterRole(contributors);
+        List<Contributor> translators = DoapUtil.getContributorsWithTranslatorRole(contributors);
+        List<Contributor> testers = DoapUtil.getContributorsWithTesterRole(contributors);
+        List<Contributor> helpers = DoapUtil.getContributorsWithHelperRole(contributors);
+        List<Contributor> unknowns = DoapUtil.getContributorsWithUnknownRole(contributors);
 
         // By default, all developers are maintainers and contributors are helpers
         if (isDeveloper) {
@@ -1804,6 +1796,14 @@ public class DoapMojo extends AbstractMojo {
         writer.endElement(); // doapType
     }
 
+    private static ScmManager createScmManager() {
+        return new BasicScmManager() {
+            {
+                setScmProvider("svn", new SvnExeScmProvider());
+            }
+        };
+    }
+
     /**
      * Return a <code>SCM repository</code> defined by a given url.
      *
@@ -1834,7 +1834,7 @@ public class DoapMojo extends AbstractMojo {
      *      http://svn.apache.org/repos/asf/infrastructure/site-tools/trunk/projects/asfext</a>
      * @see <a href="http://projects.apache.org/docs/pmc.html">http://projects.apache.org/docs/pmc.html</a>
      */
-    private void writeASFext(XMLWriter writer, MavenProject project) {
+    private void writeASFext(XMLWriter writer, Project project) {
         if (!asfExtOptions.isIncluded()) {
             return;
         }
@@ -1842,7 +1842,7 @@ public class DoapMojo extends AbstractMojo {
         DoapUtil.writeComment(writer, "ASF extension.");
 
         // asfext:pmc
-        String pmc = DoapUtil.interpolate(asfExtOptions.getPmc(), project, settings);
+        String pmc = DoapUtil.interpolate(asfExtOptions.getPmc(), project, session.getSettings());
         if (pmc != null && !pmc.isEmpty()) {
             DoapUtil.writeRdfResourceElement(writer, asfExtOptions.getXmlnsPrefix(), "pmc", pmc);
         } else {
@@ -1850,7 +1850,7 @@ public class DoapMojo extends AbstractMojo {
         }
 
         // asfext:name
-        String name = DoapUtil.interpolate(asfExtOptions.getName(), project, settings);
+        String name = DoapUtil.interpolate(asfExtOptions.getName(), project, session.getSettings());
         if (name != null && !name.isEmpty()) {
             if (!name.toLowerCase(Locale.ENGLISH).trim().startsWith("apache")) {
                 name = "Apache " + name;
@@ -1860,7 +1860,7 @@ public class DoapMojo extends AbstractMojo {
             messages.addMessage(new String[] {"asfExtOptions", "name"}, null, UserMessages.REQUIRED_BY_ASF);
         }
 
-        String homepage = DoapUtil.interpolate(doapOptions.getHomepage(), project, settings);
+        String homepage = DoapUtil.interpolate(doapOptions.getHomepage(), project, session.getSettings());
         if (homepage != null && !homepage.isEmpty()) {
             try {
                 new URL(homepage);
@@ -1880,7 +1880,7 @@ public class DoapMojo extends AbstractMojo {
 
         // asfext:chair
         @SuppressWarnings("unchecked")
-        List<Developer> developers = new ArrayList<Developer>(project.getDevelopers());
+        List<Developer> developers = new ArrayList<Developer>(project.getModel().getDevelopers());
         sortContributors(developers);
 
         if (StringUtils.isNotEmpty(asfExtOptions.getChair())) {
@@ -2034,7 +2034,7 @@ public class DoapMojo extends AbstractMojo {
      * @since 1.1
      */
     private void writeAudience(XMLWriter writer) {
-        String audience = DoapUtil.interpolate(doapOptions.getAudience(), project, settings);
+        String audience = DoapUtil.interpolate(doapOptions.getAudience(), project, session.getSettings());
         if (audience == null || audience.isEmpty()) {
             return;
         }
@@ -2051,7 +2051,7 @@ public class DoapMojo extends AbstractMojo {
      * @since 1.1
      */
     private void writeBlog(XMLWriter writer) {
-        String blog = DoapUtil.interpolate(doapOptions.getBlog(), project, settings);
+        String blog = DoapUtil.interpolate(doapOptions.getBlog(), project, session.getSettings());
         if (StringUtils.isEmpty(doapOptions.getBlog())) {
             return;
         }
@@ -2095,8 +2095,8 @@ public class DoapMojo extends AbstractMojo {
      * @see <a href="http://usefulinc.com/ns/doap#vendor">http://usefulinc.com/ns/doap#vendor</a>
      * @since 1.1
      */
-    private void writeVendor(XMLWriter writer, MavenProject project) {
-        String vendor = DoapUtil.interpolate(doapOptions.getVendor(), project, settings);
+    private void writeVendor(XMLWriter writer, Project project) {
+        String vendor = DoapUtil.interpolate(doapOptions.getVendor(), project, session.getSettings());
         if (vendor == null || vendor.isEmpty()) {
             return;
         }
@@ -2143,7 +2143,7 @@ public class DoapMojo extends AbstractMojo {
      * @since 1.1
      */
     private void writeServiceEndpoint(XMLWriter writer) {
-        String serviceEndpoint = DoapUtil.interpolate(doapOptions.getServiceEndpoint(), project, settings);
+        String serviceEndpoint = DoapUtil.interpolate(doapOptions.getServiceEndpoint(), project, session.getSettings());
         if (serviceEndpoint == null || serviceEndpoint.isEmpty()) {
             return;
         }
@@ -2191,7 +2191,7 @@ public class DoapMojo extends AbstractMojo {
      * @since 1.1
      */
     private void writeExtra(
-            XMLWriter writer, MavenProject project, String comment, Map<Object, String> map, String xmlnsPrefix) {
+            XMLWriter writer, Project project, String comment, Map<Object, String> map, String xmlnsPrefix) {
         if (map == null || map.isEmpty()) {
             return;
         }
@@ -2205,7 +2205,7 @@ public class DoapMojo extends AbstractMojo {
                 continue;
             }
 
-            String interpolatedValue = DoapUtil.interpolate(value, project, settings);
+            String interpolatedValue = DoapUtil.interpolate(value, project, session.getSettings());
             if (interpolatedValue == null) {
                 continue;
             }
