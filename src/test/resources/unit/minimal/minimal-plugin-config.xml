@@ -33,6 +33,7 @@ under the License.
         <artifactId>maven-doap-plugin</artifactId>
         <configuration>
           <doapFile>target/doap_minimal.rdf</doapFile>
+          <extOptions/>
         </configuration>
       </plugin>
     </plugins>

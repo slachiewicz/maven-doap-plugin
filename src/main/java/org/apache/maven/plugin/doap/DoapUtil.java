@@ -470,6 +470,11 @@ public class DoapUtil {
                         || "basedir".equals(expression)) {
                     return project.getBasedir().toString();
                 }
+                if ("project.name".equals(expression) || "pom.name".equals(expression)) {
+                    // MavenProject#getName defaults to the artifactId, the model does not
+                    String name = project.getModel().getName();
+                    return name != null ? name : project.getArtifactId();
+                }
                 return null;
             }
         });
