@@ -79,22 +79,22 @@ class ContributorWriter {
         }
 
         // all alphabetical
-        if (developers.size() != 0) {
+        if (!developers.isEmpty()) {
             writeContributor(writer, developers, "developer");
         }
-        if (documenters.size() != 0) {
+        if (!documenters.isEmpty()) {
             writeContributor(writer, documenters, "documenter");
         }
-        if (helpers.size() != 0) {
+        if (!helpers.isEmpty()) {
             writeContributor(writer, helpers, "helper");
         }
-        if (maintainers.size() != 0) {
+        if (!maintainers.isEmpty()) {
             writeContributor(writer, maintainers, "maintainer");
         }
-        if (testers.size() != 0) {
+        if (!testers.isEmpty()) {
             writeContributor(writer, testers, "tester");
         }
-        if (translators.size() != 0) {
+        if (!translators.isEmpty()) {
             writeContributor(writer, translators, "translator");
         }
     }
